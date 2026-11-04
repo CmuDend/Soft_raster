@@ -1,0 +1,9 @@
+build/
+cmake-build-*/
+*.tga
+*.ppm
+out/
+frame_*.png
+.DS_Store
+.vscode/
+.idea/
