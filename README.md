@@ -1,66 +1,65 @@
-# soft_raster
+# Soft Rasterizer
 
-纯 CPU 的软件光栅化器。SDL2 只做一件事：把 `Framebuffer::color` 上传成纹理贴到窗口上。
-所有顶点变换、三角形填充、深度测试、着色都在 `src/main.cpp` 里手写完成。
+不依赖任何图形 API 的软件光栅化渲染管线（C++17）。SDL2 只负责开窗、收输入、
+把 CPU 的 framebuffer 当纹理贴到窗口上——所有顶点变换、裁剪、光栅化、深度测试、
+插值和着色都是自己写的。
 
-![预览](docs/preview.png)
+> 按《软光栅渲染器技术指导》的 D0–D14 日程推进，进度见文末。
+
+![D0：渐变上屏](docs/images/d0_gradient.png)
 
 ## 构建与运行
 
 ```bash
-cmake --preset release        # 首次
-cmake --build build           # 之后每次
-
-./build/soft_raster                       # 开窗口，实时旋转
-./build/soft_raster --dump out.ppm --time 0.9   # 离屏渲染一帧（PPM，可用 sips 转 PNG）
-./build/soft_raster --bench 300           # 测平均帧耗时
+brew install cmake ninja sdl2     # 只做一次
+cmake --preset release            # 配置：检测 SDL2，在 build/ 生成 Ninja 工程
+cmake --build --preset release    # 编译链接
+./build/soft_raster               # 运行：S 存图，ESC 或关窗退出
 ```
 
-命令行参数：
+产物：`build/soft_raster`、`out.tga`（当前帧）。
 
-| 参数 | 作用 |
-| --- | --- |
-| `--dump <文件.ppm>` | 离屏渲染一帧并写文件（不需要窗口/显示器） |
-| `--time <秒>` | 离屏渲染使用的动画时间 |
-| `--size <宽> <高>` | 分辨率，默认 960×540 |
-| `--ssaa <倍数>` | 超采样抗锯齿倍数，默认 2，`1` 关闭 |
-| `--wireframe` | 只画三角形边线 |
-| `--no-cull` | 关闭背面剔除（配合深度测试观察遮挡） |
-| `--bench <帧数>` | 连续离屏渲染，打印 ms/帧 |
-
-运行时按键：`SPACE` 线框、`C` 背面剔除、`A` 抗锯齿、`R` 重置动画时间、`ESC` 退出。
-
-## 管线
+## 目录
 
 ```
-模型空间 --model--> 世界空间 --view--> 相机空间 --projection--> 裁剪空间
-        --透视除法--> NDC --视口变换--> 屏幕空间
-        --边函数--> 覆盖的像素 --重心坐标--> 深度测试 + 透视校正插值 --> 颜色缓冲
+src/
+├── main.cpp              入口：开窗 / 主循环 / 输入
+├── math/                 Vec/Mat/投影——D1 起填充
+├── core/
+│   ├── framebuffer.*     颜色 + 深度缓冲，clear / setPixel / 导出 TGA
+│   ├── texture.*         纹理采样与 mipmap——D3/D8
+│   └── camera.*          轨道相机——D4
+├── pipeline/
+│   ├── vertex.h          Vertex / VSOut / SVert——D1/D2
+│   ├── shader.h          着色器接口——D3
+│   ├── rasterizer.*      裁剪 → 光栅化 → 插值 → 片元——D2/D5
+│   └── renderer.*        组织一次 draw call——D2
+├── scene/                Mesh / OBJ 加载 / 场景——D4
+└── platform/
+    └── window_sdl.*      SDL 只在这一层出现
+tests/  bench/  assets/  docs/
 ```
 
-`main.cpp` 按顺序分成几块：
+CMake 把渲染核心编成 `sr_core`（**不链接 SDL**），可执行文件 `soft_raster` 只多出
+`platform/window_sdl.cpp`。这样后面的 `test_all` 和 `bench` 都能在没有窗口的机器上跑。
 
-1. **数学库**：`Vec3/Vec4/Mat4`（行主序、列向量）、`perspective`、`lookAt`、旋转/平移/缩放。
-2. **帧缓冲**：`color`（`0xAARRGGBB`）+ `depth`（`[0,1]`，0 近 1 远）。
-3. **光栅化**：`edgeFunction` 判左右侧；`rasterizeTriangle` 用三个边函数做覆盖率测试，
-   像素中心采样，重心坐标线性插值 NDC z 做深度测试，颜色按 `1/w` 加权做透视校正插值。
-4. **场景**：立方体（每个面独立四顶点，便于算面法线）、棋盘地板、两个旋转物体。
-5. **着色**：面法线 + Lambert 主光 + 朝向相机的补光，再加距离雾。
-6. **输出**：窗口模式（SDL 纹理）或离屏 PPM。
+## 进度
 
-## 几个实现细节
+| 天 | 目标 | 状态 |
+| --- | --- | --- |
+| D0 | 环境 + CMake + 空窗口 + framebuffer 导出 TGA | ✅ |
+| D1 | 数学库 + 画线 + 线框立方体 | |
+| D2 | 边函数光栅化 + 深度缓冲 + 背面剔除 | |
+| D3 | 透视校正 + 纹理 + Blinn-Phong | |
+| D4 | OBJ + 场景 + 轨道相机 + 实时窗口 | |
+| D5 | 近平面裁剪 + 单元测试 | |
+| D6 | benchmark + 第一波优化 | |
+| D7 | 多线程 tile 渲染 | |
+| D8–D14 | mipmap / 抗锯齿 / 阴影 / 文档 / demo / 模拟面试 | |
 
-- **正反面判定**：屏幕 y 轴向下，所以视口变换后正面三角形的有向面积为负，`area > 0` 即背面。
-- **深度插值**：NDC z 是屏幕空间坐标的仿射函数，线性插值就是精确的；颜色必须走透视校正。
-- **抗锯齿**：不做 MSAA，而是按 `ssaa` 倍分辨率整帧渲染后盒式降采样，改动最小、结果直观。
+开发过程记录在 [docs/devlog.md](docs/devlog.md)。
 
-左：`--ssaa 1`（关闭）；右：默认 `--ssaa 2`（每像素 4 个子采样）：
+## 已知限制
 
-![抗锯齿对比](docs/aa_compare.png)
-
-## 已知限制 / 下一步
-
-- 没有近平面裁剪：顶点跑到相机后面时整个三角形被丢弃，下一步应在裁剪空间做 Sutherland–Hodgman 裁剪。
-- 没有纹理与 UV 采样（透视校正插值已经具备，可直接复用到 UV）。
-- 单线程、无 SIMD、无分块（tile）优化；边界框按三角形整体包围盒遍历。
-- 无阴影、无多光源。
+- 目前只有 D0：画面是固定渐变，还没有几何管线。
+- 窗口尺寸固定（960×540），D4 做缩放时再重建纹理。
