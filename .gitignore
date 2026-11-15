@@ -7,3 +7,6 @@ frame_*.png
 .DS_Store
 .vscode/
 .idea/
+
+# 个人参考文档，不进仓库
+软光栅渲染器技术指导_副本.md
