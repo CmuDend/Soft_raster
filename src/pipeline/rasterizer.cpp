@@ -54,3 +54,45 @@ void drawLine(Framebuffer& fb, const SVert& a, const SVert& b, Color color) {
 
     (void)fb; (void)a; (void)b; (void)color;
 }
+
+// ===== D2：三角形光栅化 =====
+void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2, Color color, bool cullBack) {
+    // 1) 面积（edge 你自己先填，否则这里恒为 0）
+    float area = edge(v0.x, v0.y, v1.x, v1.y, v2.x, v2.y);
+    if (std::fabs(area) < 1e-8f) return;  // 2) 退化三角形，避免除 0
+
+    // 3) 背面剔除（正面 = area > 0，D2 任务书第 4 节已验证）
+    if (cullBack && area < 0.0f) return;
+    // 4) 统一绕序成 area > 0，后面三个边函数才都 >= 0
+    if (area < 0.0f) { std::swap(v1, v2); area = -area; }
+
+    const float invArea = 1.0f / area;
+
+    // 5) 包围盒：floor(min) / ceil(max)，再 clamp 到屏幕（越界写内存是新手第一个段错误）
+    const int minX = std::max(0, static_cast<int>(std::floor(std::min({v0.x, v1.x, v2.x}))));
+    const int maxX = std::min(fb.width() - 1, static_cast<int>(std::ceil(std::max({v0.x, v1.x, v2.x}))));
+    const int minY = std::max(0, static_cast<int>(std::floor(std::min({v0.y, v1.y, v2.y}))));
+    const int maxY = std::min(fb.height() - 1, static_cast<int>(std::ceil(std::max({v0.y, v1.y, v2.y}))));
+    if (minX > maxX || minY > maxY) return;
+
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            // TODO 6) 采样点取像素中心：px = x + 0.5f, py = y + 0.5f
+            const float px = x + 0.5f, py = y + 0.5f;
+            // TODO 7) 重心坐标（用 edge 和 invArea）：
+            const float w0 = edge(v1.x, v1.y, v2.x, v2.y, px ,py) * invArea;
+            const float w1 = edge(v2.x, v2.y, v0.x, v0.y, px ,py) * invArea;
+            const float w2 = 1.0f - w0 - w1;  // 省一次边函数
+            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) continue;  // 在三角形外面
+
+            const float z01 = (w0 * v0.z + w1 * v1.z + w2 * v2.z) * 0.5f + 0.5f;  // TODO 8) 深度
+            const size_t idx = static_cast<size_t>(y) * fb.width() + static_cast<size_t>(x);
+            if (z01 >= fb.depthData()[idx]) continue;
+            fb.depthData()[idx] = z01;
+            fb.colorData()[idx] = color;  // TODO 9) 深度测试
+            
+        }
+    }
+
+   
+}
