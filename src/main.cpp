@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 
@@ -6,6 +7,7 @@
 #include "math/mat.h"
 #include "math/vec.h"
 #include "pipeline/rasterizer.h"
+#include "pipeline/vertex.h"
 #include "platform/window_sdl.h"
 
 namespace {
@@ -18,45 +20,40 @@ constexpr float kPi = 3.14159265358979323846f;
 // 深度对了再改成 true 测剔除（应还是实心，但画得少一半）。
 constexpr bool kCullBack = true;
 
-// 立方体 8 个顶点
-const Vec3 kCube[8] = {
-    {-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
-    {-1, -1, 1},  {1, -1, 1},  {1, 1, 1},  {-1, 1, 1},
-};
+Color shadeChecker(Vec2 uv) {
+    const int N = 8;
+    int cx = (int)std::floor(uv.x * N);
+    int cy = (int)std::floor(uv.y * N);
+    return ((cx + cy) & 1) ? rgb(20, 20, 20) : rgb(220, 220, 220);
+}
 
-// 12 个三角形（CCW 朝外，已算好绕序），每个面一个颜色
-struct Tri {
-    int idx[3];
-    Color color;
-};
-const Tri kTris[12] = {
-    {{4, 5, 6}, rgb(90, 190, 110)},  {{4, 6, 7}, rgb(90, 190, 110)},   // +Z 绿
-    {{0, 3, 2}, rgb(170, 90, 190)},  {{0, 2, 1}, rgb(170, 90, 190)},   // -Z 紫
-    {{1, 2, 6}, rgb(200, 70, 60)},   {{1, 6, 5}, rgb(200, 70, 60)},    // +X 红
-    {{0, 7, 3}, rgb(60, 90, 200)},   {{0, 4, 7}, rgb(60, 90, 200)},    // -X 蓝
-    {{3, 6, 2}, rgb(210, 200, 90)},  {{3, 7, 6}, rgb(210, 200, 90)},   // +Y 黄
-    {{0, 1, 5}, rgb(120, 120, 130)}, {{0, 5, 4}, rgb(120, 120, 130)},  // -Y 灰
-};
+constexpr bool kPerspectiveCorrect = true;   // 先 false 看扭曲
 
-// 实心立方体：M(model) 第一次登场，把立方体转个角度让 3 个面露出来
-void drawCube(Framebuffer& fb) {
+void drawScene(Framebuffer& fb) {
     fb.clear(rgb(16, 16, 24));
 
-    const Mat4 view = lookAt({0, 0, 5}, {0, 0, 0}, {0, 1, 0});
+    const Mat4 view = lookAt({0, 0.6f, 3.0f}, {0, -0.6f, -1.0f}, {0, 1, 0});
     const Mat4 proj = perspective(60.0f * kPi / 180.0f, float(kWidth) / float(kHeight), 0.1f, 100.0f);
-    const Mat4 model = rotationY(0.7f) * rotationX(-0.4f);
-    const Mat4 mvp = proj * view * model;
+    const Mat4 mvp = proj * view;   // 地面不旋转，model 是单位阵
 
-    for (const Tri& t : kTris) {
+    const Vertex quad[4] = {
+        {{-2, -1, -2}, {0, 0}},
+        {{ 2, -1, -2}, {1, 0}},
+        {{ 2, -1,  2}, {1, 1}},
+        {{-2, -1,  2}, {0, 1}},
+    };
+    const int tris[2][3] = {{0, 2, 1}, {0, 3, 2}};   // +Y 朝上（相机在上方往下看）
+
+    for (const auto& t : tris) {
         SVert s[3];
         bool ok = true;
         for (int i = 0; i < 3; ++i) {
-            const Vec3& p = kCube[t.idx[i]];
-            const Vec4 clip = mvp * Vec4{p.x, p.y, p.z, 1.0f};
-            if (clip.w <= 1e-5f) { ok = false; break; }  // 顶点在相机后面，整三角形丢弃
-            s[i] = toScreen(clip, kWidth, kHeight);
+            const Vertex& v = quad[t[i]];
+            const Vec4 clip = mvp * Vec4{v.position.x, v.position.y, v.position.z, 1.0f};
+            if (clip.w <= 1e-5f) { ok = false; break; }
+            s[i] = toScreen(clip, v.uv, kWidth, kHeight);
         }
-        if (ok) drawTriangle(fb, s[0], s[1], s[2], t.color, kCullBack);
+        if (ok) drawTriangle(fb, s[0], s[1], s[2], kCullBack, kPerspectiveCorrect, shadeChecker);
     }
 }
 
@@ -65,7 +62,7 @@ void drawCube(Framebuffer& fb) {
 int main() {
     try {
         Framebuffer fb(kWidth, kHeight);
-        drawCube(fb);
+        drawScene(fb);
 
         if (fb.exportTGA("out.tga")) {
             std::puts("已导出 out.tga");

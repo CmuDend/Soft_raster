@@ -3,7 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
-SVert toScreen(const Vec4& clip, int width, int height) {
+
+SVert toScreen(const Vec4& clip, const Vec2& uv, int width, int height) {
     float invW = 1.0f / clip.w;
     float ndcX = clip.x * invW;
     float ndcY = clip.y * invW;
@@ -18,6 +19,8 @@ SVert toScreen(const Vec4& clip, int width, int height) {
     s.y = (1.0f - (ndcY * 0.5f + 0.5f)) * float(height);
     s.z = ndcZ;
     s.invW = invW;
+    s.uv = uv;
+    s.uvOverW = uv * invW;
     return s;
 }
 
@@ -56,7 +59,7 @@ void drawLine(Framebuffer& fb, const SVert& a, const SVert& b, Color color) {
 }
 
 // ===== D2：三角形光栅化 =====
-void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2, Color color, bool cullBack) {
+void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2, bool cullBack, bool perspectiveCorrect, Color (*shade)(Vec2)) {
     // 1) 面积（edge 你自己先填，否则这里恒为 0）
     float area = edge(v0.x, v0.y, v1.x, v1.y, v2.x, v2.y);
     if (std::fabs(area) < 1e-8f) return;  // 2) 退化三角形，避免除 0
@@ -86,10 +89,23 @@ void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2, Color color, bo
             if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) continue;  // 在三角形外面
 
             const float z01 = (w0 * v0.z + w1 * v1.z + w2 * v2.z) * 0.5f + 0.5f;  // TODO 8) 深度
-            const size_t idx = static_cast<size_t>(y) * fb.width() + static_cast<size_t>(x);
+            const size_t idx = (size_t)y * fb.width() + (size_t)x;
             if (z01 >= fb.depthData()[idx]) continue;
-            fb.depthData()[idx] = z01;
-            fb.colorData()[idx] = color;  // TODO 9) 深度测试
+              // TODO 9) 深度测试
+            Vec2 uv;
+            if (perspectiveCorrect){
+                const Vec2 uvOverW = v0.uvOverW * w0 + v1.uvOverW * w1 + v2.uvOverW * w2;
+
+                const float invW = v0.invW * w0 + v1.invW * w1 + v2.invW * w2;
+                uv = uvOverW * (1.0f / invW);
+                }
+                else{
+                    uv = v0.uv * w0 + v1.uv * w1 + v2.uv * w2; 
+
+
+                 }
+                 fb.depthData()[idx] = z01;
+                 fb.colorData()[idx] = shade(uv);
             
         }
     }
