@@ -10,3 +10,7 @@ frame_*.png
 
 # 个人参考文档，不进仓库
 软光栅渲染器技术指导_副本.md
+
+# D3 透视校正对照图，不公开
+docs/images/affine.png
+docs/images/perspective.png
