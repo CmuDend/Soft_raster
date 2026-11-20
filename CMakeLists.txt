@@ -17,6 +17,7 @@ find_package(SDL2 REQUIRED)
 # 每完成一天，把新文件加进这个列表（只加不改）。
 add_library(sr_core
   src/core/framebuffer.cpp
+  src/core/texture.cpp
   src/pipeline/rasterizer.cpp 
 )
 

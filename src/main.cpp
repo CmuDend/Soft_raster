@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "core/framebuffer.h"
+#include "core/texture.h"
 #include "math/mat.h"
 #include "math/vec.h"
 #include "pipeline/rasterizer.h"
@@ -20,11 +21,22 @@ constexpr float kPi = 3.14159265358979323846f;
 // 深度对了再改成 true 测剔除（应还是实心，但画得少一半）。
 constexpr bool kCullBack = true;
 
+// 棋盘格纹理：size×size 个纹素，每格 cell×cell 个纹素
+// （格子必须比 1 个纹素宽，否则每个纹素都挨着反色，双线性会把整块糊成灰色）
+Texture makeCheckerboard(int size, int cell) {
+    Texture t(size, size);
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            const int cx = x / cell, cy = y / cell;
+            t.setTexel(x, y, ((cx + cy) & 1) ? rgb(20, 20, 20) : rgb(220, 220, 220));
+        }
+    return t;
+}
+
+Texture g_checker = makeCheckerboard(64, 8);  // 64×64 纹素，8×8 格
+
 Color shadeChecker(Vec2 uv) {
-    const int N = 8;
-    int cx = (int)std::floor(uv.x * N);
-    int cy = (int)std::floor(uv.y * N);
-    return ((cx + cy) & 1) ? rgb(20, 20, 20) : rgb(220, 220, 220);
+    return g_checker.sample(uv);  // 双线性采样
 }
 
 constexpr bool kPerspectiveCorrect = true;   // 先 false 看扭曲
