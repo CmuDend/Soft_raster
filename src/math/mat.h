@@ -114,3 +114,81 @@ inline Mat4 rotationY(float rad) {
         return m;
    
 }
+
+// ===== D3 Part 3：3x3 矩阵与法线矩阵 =====
+// 法线是"余向量"，在变换 M 下要满足 n'·t' = 0，推出来 n' = (M⁻¹)ᵀ n。
+// 只有旋转/等比缩放时它才等于 M 的上 3x3；非等比缩放时直接用 M 会让法线歪掉。
+struct Mat3 {
+    float m[9] = {};
+
+    static Mat3 identity() {
+        Mat3 r;
+        r.m[0] = r.m[4] = r.m[8] = 1.0f;
+        return r;
+    }
+
+    float&       operator()(int r, int c)       { return m[c * 3 + r]; }
+    const float& operator()(int r, int c) const { return m[c * 3 + r]; }
+};
+
+inline Vec3 operator*(const Mat3& a, const Vec3& v) {
+    return {
+        a(0,0)*v.x + a(0,1)*v.y + a(0,2)*v.z,
+        a(1,0)*v.x + a(1,1)*v.y + a(1,2)*v.z,
+        a(2,0)*v.x + a(2,1)*v.y + a(2,2)*v.z,
+    };
+}
+
+inline Mat3 operator*(const Mat3& a, const Mat3& b) {
+    Mat3 r;
+    for (int c = 0; c < 3; ++c)
+        for (int rr = 0; rr < 3; ++rr) {
+            float s = 0.0f;
+            for (int k = 0; k < 3; ++k) s += a(rr, k) * b(k, c);
+            r(rr, c) = s;
+        }
+    return r;
+}
+
+inline Mat3 transpose(const Mat3& a) {
+    Mat3 r;
+    for (int c = 0; c < 3; ++c)
+        for (int rr = 0; rr < 3; ++rr) r(rr, c) = a(c, rr);
+    return r;
+}
+
+// 伴随矩阵 / 行列式；奇异矩阵返回单位阵（法线宁可不转，也不要 NaN）
+inline Mat3 inverse(const Mat3& a) {
+    const float a00 = a(0,0), a01 = a(0,1), a02 = a(0,2);
+    const float a10 = a(1,0), a11 = a(1,1), a12 = a(1,2);
+    const float a20 = a(2,0), a21 = a(2,1), a22 = a(2,2);
+
+    const float det = a00 * (a11 * a22 - a12 * a21)
+                    - a01 * (a10 * a22 - a12 * a20)
+                    + a02 * (a10 * a21 - a11 * a20);
+    if (std::fabs(det) < 1e-12f) return Mat3::identity();
+
+    const float inv = 1.0f / det;
+    Mat3 r;
+    r(0,0) = (a11 * a22 - a12 * a21) * inv;
+    r(0,1) = (a02 * a21 - a01 * a22) * inv;
+    r(0,2) = (a01 * a12 - a02 * a11) * inv;
+    r(1,0) = (a12 * a20 - a10 * a22) * inv;
+    r(1,1) = (a00 * a22 - a02 * a20) * inv;
+    r(1,2) = (a02 * a10 - a00 * a12) * inv;
+    r(2,0) = (a10 * a21 - a11 * a20) * inv;
+    r(2,1) = (a01 * a20 - a00 * a21) * inv;
+    r(2,2) = (a00 * a11 - a01 * a10) * inv;
+    return r;
+}
+
+inline Mat3 upper3x3(const Mat4& m) {
+    Mat3 r;
+    for (int c = 0; c < 3; ++c)
+        for (int rr = 0; rr < 3; ++rr) r(rr, c) = m(rr, c);
+    return r;
+}
+
+inline Mat3 normalMatrix(const Mat4& model) {
+    return transpose(inverse(upper3x3(model)));
+}

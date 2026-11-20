@@ -18,7 +18,8 @@ find_package(SDL2 REQUIRED)
 add_library(sr_core
   src/core/framebuffer.cpp
   src/core/texture.cpp
-  src/pipeline/rasterizer.cpp 
+  src/pipeline/rasterizer.cpp
+  src/pipeline/shader.cpp
 )
 
 target_include_directories(sr_core PUBLIC src third_party)
