@@ -31,6 +31,15 @@ void Texture::setTexel(int x, int y, Color c) {
     m_texels[size_t(y) * size_t(m_width) + size_t(x)] = c;
 }
 
+int Texture::wrapIndex(int i, int n) const {
+    if (m_wrap == Wrap::Repeat) {
+        i %= n;               // C++ 的 % 对负数结果还是负的
+        if (i < 0) i += n;
+        return i;
+    }
+    return std::clamp(i, 0, n - 1);
+}
+
 Color Texture::sample(Vec2 uv) const {
     // 1) uv ∈ [0,1] -> 连续纹素坐标；减 0.5 让整数坐标对齐纹素中心
     const float u = uv.x * float(m_width) - 0.5f;
@@ -42,11 +51,13 @@ Color Texture::sample(Vec2 uv) const {
     const float fx = u - float(x0);
     const float fy = v - float(y0);
 
-    // 3) 四个邻居（texel 内部 clamp，x0=-1 或 x0+1=width 都安全）
-    const Color c00 = texel(x0, y0);
-    const Color c10 = texel(x0 + 1, y0);
-    const Color c01 = texel(x0, y0 + 1);
-    const Color c11 = texel(x0 + 1, y0 + 1);
+    // 3) 四个邻居：按 wrap 规则映射回纹素网格（Repeat 时地面才能平铺）
+    const int xa = wrapIndex(x0, m_width), xb = wrapIndex(x0 + 1, m_width);
+    const int ya = wrapIndex(y0, m_height), yb = wrapIndex(y0 + 1, m_height);
+    const Color c00 = texel(xa, ya);
+    const Color c10 = texel(xb, ya);
+    const Color c01 = texel(xa, yb);
+    const Color c11 = texel(xb, yb);
 
     // 4) 先水平两次，再垂直一次
     const Color bottom = lerpColor(c00, c10, fx);

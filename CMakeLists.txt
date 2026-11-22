@@ -20,6 +20,8 @@ add_library(sr_core
   src/core/texture.cpp
   src/pipeline/rasterizer.cpp
   src/pipeline/shader.cpp
+  src/scene/primitives.cpp
+  src/scene/obj_loader.cpp
 )
 
 target_include_directories(sr_core PUBLIC src third_party)

@@ -58,6 +58,15 @@ FrameInput Window::pollEvents() {
         } else if (e.type == SDL_KEYDOWN) {
             if (e.key.keysym.sym == SDLK_ESCAPE) in.quit = true;
             if (e.key.keysym.sym == SDLK_s) in.saveRequested = true;
+            if (e.key.keysym.sym == SDLK_r) in.resetView = true;
+        } else if (e.type == SDL_MOUSEMOTION) {
+            // 只有按住左键拖动才算旋转，否则滑过窗口就会乱转
+            if (e.motion.state & SDL_BUTTON_LMASK) {
+                in.mouseDX += float(e.motion.xrel);
+                in.mouseDY += float(e.motion.yrel);
+            }
+        } else if (e.type == SDL_MOUSEWHEEL) {
+            in.wheel += float(e.wheel.y);
         }
     }
     return in;
