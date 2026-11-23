@@ -11,6 +11,7 @@
 #include "core/texture.h"
 #include "math/mat.h"
 #include "math/vec.h"
+#include "pipeline/clip.h"
 #include "pipeline/rasterizer.h"
 #include "pipeline/shader.h"
 #include "platform/window_sdl.h"
@@ -47,29 +48,46 @@ const Mesh g_cube = makeCube();
 
 // 顶点处理 + 图元装配。viewProj 由调用方传进来，一帧只算一次。
 void drawMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& model, const Mat4& viewProj,
-              const IShader& shader) {
+              const IShader& shader, bool clipNear = true) {
     const Mat4 mvp = viewProj * model;
     const Mat3 nrmMat = normalMatrix(model);
 
     for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
-        SVert s[3];
-        bool ok = true;
+        VSOut tri[3];
         for (int k = 0; k < 3; ++k) {
             const Vertex& v = mesh.verts[size_t(mesh.indices[i + size_t(k)])];
             const Vec4 pos{v.position.x, v.position.y, v.position.z, 1.0f};
             const Vec4 wpos = model * pos;
 
-            VSOut o;
+            VSOut& o = tri[k];
             o.clip = mvp * pos;
             o.worldPos = {wpos.x, wpos.y, wpos.z};
             o.normal = normalize(nrmMat * v.normal);
             o.uv = v.uv;
-
-            // 还没做近平面裁剪（D5）：有顶点跑到相机背后就整片丢掉
-            if (o.clip.w <= 1e-5f) { ok = false; break; }
-            s[k] = toScreen(o, kWidth, kHeight);
         }
-        if (ok) drawTriangle(fb, s[0], s[1], s[2], kCullBack, kPerspectiveCorrect, shader);
+
+        // 近平面裁剪：跨近平面的三角形在这里被切开，而不是整片丢弃（指导 §7.3）
+        VSOut poly[4];
+        int n = 0;
+        if (clipNear) {
+            n = clipTriangleNear(tri, poly);
+        } else {
+            // 对照实验：D4 的做法，有顶点在近平面后就整片丢弃
+            if (tri[0].clip.w > 1e-5f && tri[1].clip.w > 1e-5f && tri[2].clip.w > 1e-5f) {
+                poly[0] = tri[0];
+                poly[1] = tri[1];
+                poly[2] = tri[2];
+                n = 3;
+            }
+        }
+        if (n < 3) continue;
+
+        // 扇形三角化：n == 3 时就是原来那一个三角形，n == 4 时切成两个
+        SVert s[4];
+        for (int k = 0; k < n; ++k) s[k] = toScreen(poly[k], kWidth, kHeight);
+        for (int k = 0; k + 2 < n; ++k) {
+            drawTriangle(fb, s[0], s[k + 1], s[k + 2], kCullBack, kPerspectiveCorrect, shader);
+        }
     }
 }
 
@@ -77,6 +95,7 @@ void drawMesh(Framebuffer& fb, const Mesh& mesh, const Mat4& model, const Mat4& 
 struct Options {
     bool specular = true;         // --no-spec
     bool normalizeNormal = true;  // --no-normalize
+    bool clipNear = true;         // --no-clip：退回 D4 的"整片丢弃"做对照
 };
 
 void drawScene(Framebuffer& fb, const OrbitCamera& cam, const Mesh& model, float t,
@@ -113,14 +132,14 @@ void drawScene(Framebuffer& fb, const OrbitCamera& cam, const Mesh& model, float
     solid.useSpecular = opt.specular;
     solid.normalizeNormal = opt.normalizeNormal;
 
-    drawMesh(fb, g_floor, Mat4::identity(), viewProj, floorMat);
+    drawMesh(fb, g_floor, Mat4::identity(), viewProj, floorMat, opt.clipNear);
 
     // 圆环：先绕 X 倾斜，再绕 Y 转（右乘先作用），浮在地面上方
     const Mat4 torusModel =
         translation({0.0f, -0.5f, 0.0f}) * rotationY(0.6f * t) * rotationX(0.42f);
-    drawMesh(fb, model, torusModel, viewProj, torusMat);
+    drawMesh(fb, model, torusModel, viewProj, torusMat, opt.clipNear);
 
-    drawMesh(fb, g_sphere, translation({2.05f, -0.73f, 0.85f}), viewProj, solid);
+    drawMesh(fb, g_sphere, translation({2.05f, -0.73f, 0.85f}), viewProj, solid, opt.clipNear);
 }
 
 }  // namespace
@@ -144,6 +163,8 @@ int main(int argc, char** argv) {
             opt.specular = false;
         } else if (std::strcmp(argv[i], "--no-normalize") == 0) {
             opt.normalizeNormal = false;
+        } else if (std::strcmp(argv[i], "--no-clip") == 0) {
+            opt.clipNear = false;
         } else if (std::strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
             modelPath = argv[++i];
         } else if (std::strcmp(argv[i], "--yaw") == 0 && i + 1 < argc) {
@@ -155,7 +176,8 @@ int main(int argc, char** argv) {
         } else {
             std::fprintf(stderr,
                          "用法: %s [--once] [--bench <帧>] [--time <秒>] [--model <obj>] "
-                         "[--yaw <rad>] [--pitch <rad>] [--dist <d>] [--no-spec] [--no-normalize]\n",
+                         "[--yaw <rad>] [--pitch <rad>] [--dist <d>] [--no-spec] [--no-normalize] "
+                         "[--no-clip]\n",
                          argv[0]);
             return 1;
         }

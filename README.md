@@ -27,6 +27,14 @@ cmake --build --preset release    # 编译链接
 ./build/soft_raster --model assets/torus.obj     # 换模型
 ./build/soft_raster --yaw 1.2 --pitch 0.5 --dist 8   # 指定机位（可复现的截图）
 ./build/soft_raster --no-spec --no-normalize     # 关高光 / 关法线归一化，做对照
+./build/soft_raster --dist 0.5 --no-clip         # 凑近看近平面裁剪：--no-clip 退回 D4 的"整片丢弃"
+```
+
+单元测试（纯 C++，不需要 SDL 窗口，也不需要显示器）：
+
+```bash
+cmake --build --preset release && ./build/test_all   # 直接跑，退出码非 0 即有失败
+ctest --test-dir build --output-on-failure           # 或走 CTest
 ```
 
 **要在仓库根目录运行**：`assets/torus.obj` 是相对路径。模型加载失败时会提示并回退到程序化立方体。
@@ -43,7 +51,8 @@ src/
 ├── pipeline/
 │   ├── vertex.h          Vertex / VSOut / SVert——D1/D2
 │   ├── shader.h          IShader 接口 + Blinn-Phong——D3
-│   └── rasterizer.*      光栅化 → 插值 → 片元——D2/D5
+│   ├── clip.*            近平面裁剪（齐次空间 Sutherland–Hodgman）——D5
+│   └── rasterizer.*      光栅化 → 插值 → 片元——D2
 ├── scene/
 │   ├── mesh.h             Mesh + 程序化立方体/地面/球
 │   ├── primitives.cpp
@@ -52,7 +61,8 @@ src/
 tools/                    gen_obj.py（生成 assets/torus.obj）
 └── platform/
     └── window_sdl.*      SDL 只在这一层出现
-tests/  bench/  assets/  docs/
+tests/                    单元测试（数学 / 光栅化 / 裁剪 / 采样）
+bench/  assets/  docs/
 ```
 
 CMake 把渲染核心编成 `sr_core`（**不链接 SDL**），可执行文件 `soft_raster` 只多出
@@ -67,7 +77,7 @@ CMake 把渲染核心编成 `sr_core`（**不链接 SDL**），可执行文件 `
 | D2 | 边函数光栅化 + 深度缓冲 + 背面剔除 | ✅ |
 | D3 | 透视校正 + 纹理 + Blinn-Phong | ✅ |
 | D4 | OBJ + 场景 + 轨道相机 + 实时窗口 | ✅ |
-| D5 | 近平面裁剪 + 单元测试 | |
+| D5 | 近平面裁剪 + 单元测试 | ✅ |
 | D6 | benchmark + 第一波优化 | |
 | D7 | 多线程 tile 渲染 | |
 | D8–D14 | mipmap / 抗锯齿 / 阴影 / 文档 / demo / 模拟面试 | |
@@ -76,5 +86,7 @@ CMake 把渲染核心编成 `sr_core`（**不链接 SDL**），可执行文件 `
 
 ## 已知限制
 
-- 目前只有 D0：画面是固定渐变，还没有几何管线。
-- 窗口尺寸固定（960×540），D4 做缩放时再重建纹理。
+- 只裁了**近平面**。左右上下和远平面还没裁：画面外的三角形照样会进光栅化器，
+  由包围盒 clamp 兜住（不会画错，只是白费一点时间）。屏幕很大时值得补上。
+- 窗口尺寸固定（960×540），缩放要重建纹理。
+- 单线程。D7 才上 tile 多线程。

@@ -19,6 +19,7 @@ add_library(sr_core
   src/core/framebuffer.cpp
   src/core/texture.cpp
   src/pipeline/rasterizer.cpp
+  src/pipeline/clip.cpp
   src/pipeline/shader.cpp
   src/scene/primitives.cpp
   src/scene/obj_loader.cpp
@@ -36,12 +37,22 @@ add_executable(soft_raster
 target_link_libraries(soft_raster PRIVATE sr_core SDL2::SDL2)
 target_compile_options(soft_raster PRIVATE -Wall -Wextra -Wshadow)
 
+# ---------------------------------------------------------------- D5：单元测试
+# 纯 C++、不碰 SDL、不写文件：在 CI 或远程机器上也能直接跑。
+enable_testing()
+
+add_executable(test_all
+  tests/test_main.cpp
+  tests/test_math.cpp
+  tests/test_raster.cpp
+  tests/test_clip.cpp
+  tests/test_texture.cpp
+)
+target_link_libraries(test_all PRIVATE sr_core)
+target_compile_options(test_all PRIVATE -Wall -Wextra -Wshadow)
+add_test(NAME unit COMMAND test_all)
+
 # ---------------------------------------------------------------- 后续几天启用
-# D5：单元测试骨架
-# enable_testing()
-# add_executable(test_all tests/test_math.cpp tests/test_raster.cpp tests/test_clip.cpp)
-# target_link_libraries(test_all PRIVATE sr_core)
-# add_test(NAME unit COMMAND test_all)
 
 # D6：benchmark
 # add_executable(bench bench/bench.cpp)

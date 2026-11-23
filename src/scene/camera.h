@@ -18,9 +18,12 @@ struct OrbitCamera {
     float distance = 6.0f;
 
     Vec3 eye() const {
+        // distance 为 0 时 eye 与 target 重合，lookAt 的前向向量退化成 0 → 全屏 NaN。
+        // 卡一个极小值：这样 --dist 0 也只是"贴到物体表面"，不会炸。
+        const float d = std::max(distance, 1e-3f);
         const float cp = std::cos(pitch);
         const Vec3 dir{std::sin(yaw) * cp, std::sin(pitch), std::cos(yaw) * cp};
-        return target + dir * distance;
+        return target + dir * d;
     }
 
     Mat4 view() const { return lookAt(eye(), target, Vec3{0.0f, 1.0f, 0.0f}); }

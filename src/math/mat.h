@@ -91,6 +91,15 @@ inline Mat4 scaling(float s) {
     
 }
 
+inline Mat4 scaling(const Vec3& s) {
+    // 非等比缩放：法线矩阵存在的意义就是它（指导 §7.7）
+    Mat4 m = Mat4::identity();
+    m(0,0) = s.x;
+    m(1,1) = s.y;
+    m(2,2) = s.z;
+    return m;
+}
+
 inline Mat4 rotationX(float rad) {
     // TODO：绕 X 轴，只动第 1、2 行/列
     
