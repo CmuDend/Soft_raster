@@ -37,6 +37,19 @@ public:
     virtual Color fragment(const Fragment& f) const = 0;
 };
 
+// 光栅化的开关。拆成结构体是为了 bench 能一次只改一个变量（D6）。
+struct RasterOptions {
+    bool cullBack = true;            // 背面剔除
+    bool perspectiveCorrect = true;  // 透视校正插值
+    bool incrementalEdges = true;    // 增量边函数；false = D2 的逐像素重算，做对照
+};
+
+// 片元计数器：overdraw = covered / shaded，bench 用它说话
+struct RasterCounters {
+    unsigned long long covered = 0;  // 通过覆盖测试的片元
+    unsigned long long shaded = 0;   // 通过深度测试、真正着色了的片元
+};
+
 // 边函数光栅化 + 深度测试 + 背面剔除（指导 §7.2 + §7.5）
-void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2,
-                  bool cullBack, bool perspectiveCorrect, const IShader& shader);
+void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2, const RasterOptions& opt,
+                  const IShader& shader, RasterCounters* counters = nullptr);

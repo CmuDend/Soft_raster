@@ -16,9 +16,13 @@ struct Light {
 // Blinn-Phong：ambient + diffuse（Lambert）+ specular（半程向量 H）
 class PhongShader : public IShader {
 public:
-    PhongShader(const Texture* tex, Vec3 cameraPos) : m_tex(tex), m_cameraPos(cameraPos) {}
+    PhongShader(const Texture* tex = nullptr, Vec3 cameraPos = {})
+        : m_tex(tex), m_cameraPos(cameraPos) {}
 
     Color fragment(const Fragment& f) const override;
+
+    void setCameraPos(Vec3 p) { m_cameraPos = p; }
+    const Vec3& cameraPos() const { return m_cameraPos; }
 
     Light light;
     Vec3 albedo{0.85f, 0.85f, 0.85f};  // 没有贴图时的固有色

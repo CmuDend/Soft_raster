@@ -53,14 +53,17 @@ void drawLine(Framebuffer& fb, const SVert& a, const SVert& b, Color color) {
     }
 }
 
-// ===== D2：三角形光栅化（D3 起改为调用片元着色器）=====
-void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2,
-                  bool cullBack, bool perspectiveCorrect, const IShader& shader) {
+// ===== D2：三角形光栅化（D3 起调用片元着色器，D6 加增量边函数）=====
+void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2, const RasterOptions& opt,
+                  const IShader& shader, RasterCounters* counters) {
     float area = edge(v0.x, v0.y, v1.x, v1.y, v2.x, v2.y);
     if (std::fabs(area) < 1e-8f) return;          // 退化三角形，避免除 0
 
-    if (cullBack && area < 0.0f) return;          // 正面 = area > 0
-    if (area < 0.0f) { std::swap(v1, v2); area = -area; }
+    if (opt.cullBack && area < 0.0f) return;      // 正面 = area > 0
+    if (area < 0.0f) {
+        std::swap(v1, v2);
+        area = -area;
+    }
 
     const float invArea = 1.0f / area;
 
@@ -73,36 +76,82 @@ void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2,
     Color* color = fb.colorData();
     float* depth = fb.depthData();
 
-    for (int y = minY; y <= maxY; ++y) {
-        for (int x = minX; x <= maxX; ++x) {
-            const float px = x + 0.5f, py = y + 0.5f;   // 像素中心
+    unsigned long long covered = 0, shaded = 0;
 
-            const float w0 = edge(v1.x, v1.y, v2.x, v2.y, px, py) * invArea;
-            const float w1 = edge(v2.x, v2.y, v0.x, v0.y, px, py) * invArea;
-            const float w2 = 1.0f - w0 - w1;            // 省一次边函数
-            if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) continue;
+    // 一个片元的后半段：深度测试（early-Z）→ 插值 → 着色。两条循环共用。
+    const auto shadePixel = [&](int x, int y, float w0, float w1, float w2) {
+        // 深度：z_ndc 在屏幕空间是仿射的，直接线性插值就精确（指导 §7.6）
+        const float z01 = (w0 * v0.z + w1 * v1.z + w2 * v2.z) * 0.5f + 0.5f;
+        const size_t idx = size_t(y) * size_t(fb.width()) + size_t(x);
+        if (z01 >= depth[idx]) return;             // early-Z：被挡住就不着色
 
-            // 深度：z_ndc 在屏幕空间是仿射的，直接线性插值就精确（指导 §7.6）
-            const float z01 = (w0 * v0.z + w1 * v1.z + w2 * v2.z) * 0.5f + 0.5f;
-            const size_t idx = size_t(y) * size_t(fb.width()) + size_t(x);
-            if (z01 >= depth[idx]) continue;            // 深度测试（early-Z）
-
-            Fragment f;
-            if (perspectiveCorrect) {
-                const float invW = w0 * v0.invW + w1 * v1.invW + w2 * v2.invW;
-                if (invW <= 0.0f) continue;
-                const float r = 1.0f / invW;            // 插值 α/w 再除以插值的 1/w
-                f.uv = (v0.uvOverW * w0 + v1.uvOverW * w1 + v2.uvOverW * w2) * r;
-                f.normal = (v0.normalOverW * w0 + v1.normalOverW * w1 + v2.normalOverW * w2) * r;
-                f.worldPos = (v0.worldPosOverW * w0 + v1.worldPosOverW * w1 + v2.worldPosOverW * w2) * r;
-            } else {
-                f.uv = v0.uv * w0 + v1.uv * w1 + v2.uv * w2;
-                f.normal = v0.normal * w0 + v1.normal * w1 + v2.normal * w2;
-                f.worldPos = v0.worldPos * w0 + v1.worldPos * w1 + v2.worldPos * w2;
-            }
-
-            depth[idx] = z01;
-            color[idx] = shader.fragment(f);
+        Fragment f;
+        if (opt.perspectiveCorrect) {
+            const float invW = w0 * v0.invW + w1 * v1.invW + w2 * v2.invW;
+            if (invW <= 0.0f) return;
+            const float r = 1.0f / invW;           // 插值 α/w 再除以插值的 1/w
+            f.uv = (v0.uvOverW * w0 + v1.uvOverW * w1 + v2.uvOverW * w2) * r;
+            f.normal = (v0.normalOverW * w0 + v1.normalOverW * w1 + v2.normalOverW * w2) * r;
+            f.worldPos =
+                (v0.worldPosOverW * w0 + v1.worldPosOverW * w1 + v2.worldPosOverW * w2) * r;
+        } else {
+            f.uv = v0.uv * w0 + v1.uv * w1 + v2.uv * w2;
+            f.normal = v0.normal * w0 + v1.normal * w1 + v2.normal * w2;
+            f.worldPos = v0.worldPos * w0 + v1.worldPos * w1 + v2.worldPos * w2;
         }
+
+        depth[idx] = z01;
+        color[idx] = shader.fragment(f);
+        ++shaded;
+    };
+
+    if (opt.incrementalEdges) {
+        // 增量边函数（指导 §10.3）：edge() 对 p 是线性的，沿 x / y 走一步只是加常数。
+        // 边 (a→b) 的梯度：dE/dpx = by - ay，dE/dpy = -(bx - ax)
+        const float e0dx = v2.y - v1.y, e0dy = -(v2.x - v1.x);
+        const float e1dx = v0.y - v2.y, e1dy = -(v0.x - v2.x);
+        const float e2dx = v1.y - v0.y, e2dy = -(v1.x - v0.x);
+
+        const float px0 = float(minX) + 0.5f, py0 = float(minY) + 0.5f;
+        float rowE0 = edge(v1.x, v1.y, v2.x, v2.y, px0, py0);
+        float rowE1 = edge(v2.x, v2.y, v0.x, v0.y, px0, py0);
+        float rowE2 = edge(v0.x, v0.y, v1.x, v1.y, px0, py0);
+
+        for (int y = minY; y <= maxY; ++y) {
+            float e0 = rowE0, e1 = rowE1, e2 = rowE2;
+            for (int x = minX; x <= maxX; ++x) {
+                // area > 0，所以 e >= 0 等价于重心坐标 >= 0：这里不用做除法
+                if (e0 >= 0.0f && e1 >= 0.0f && e2 >= 0.0f) {
+                    ++covered;
+                    shadePixel(x, y, e0 * invArea, e1 * invArea, e2 * invArea);
+                }
+                e0 += e0dx;
+                e1 += e1dx;
+                e2 += e2dx;
+            }
+            rowE0 += e0dy;
+            rowE1 += e1dy;
+            rowE2 += e2dy;
+        }
+    } else {
+        // D2 的原版：每像素重算三次边函数，留着做 bench 的对照组
+        for (int y = minY; y <= maxY; ++y) {
+            for (int x = minX; x <= maxX; ++x) {
+                const float px = x + 0.5f, py = y + 0.5f;   // 像素中心
+
+                const float w0 = edge(v1.x, v1.y, v2.x, v2.y, px, py) * invArea;
+                const float w1 = edge(v2.x, v2.y, v0.x, v0.y, px, py) * invArea;
+                const float w2 = 1.0f - w0 - w1;            // 省一次边函数
+                if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) continue;
+
+                ++covered;
+                shadePixel(x, y, w0, w1, w2);
+            }
+        }
+    }
+
+    if (counters) {
+        counters->covered += covered;
+        counters->shaded += shaded;
     }
 }

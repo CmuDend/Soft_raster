@@ -20,9 +20,11 @@ add_library(sr_core
   src/core/texture.cpp
   src/pipeline/rasterizer.cpp
   src/pipeline/clip.cpp
+  src/pipeline/renderer.cpp
   src/pipeline/shader.cpp
   src/scene/primitives.cpp
   src/scene/obj_loader.cpp
+  src/scene/demo_scene.cpp
 )
 
 target_include_directories(sr_core PUBLIC src third_party)
@@ -52,8 +54,10 @@ target_link_libraries(test_all PRIVATE sr_core)
 target_compile_options(test_all PRIVATE -Wall -Wextra -Wshadow)
 add_test(NAME unit COMMAND test_all)
 
-# ---------------------------------------------------------------- 后续几天启用
+# ---------------------------------------------------------------- D6：benchmark
+# 同样不碰 SDL：CI 里也能跑，输出 CSV 供脚本画图。
+add_executable(bench bench/bench.cpp)
+target_link_libraries(bench PRIVATE sr_core)
+target_compile_options(bench PRIVATE -Wall -Wextra -Wshadow)
 
-# D6：benchmark
-# add_executable(bench bench/bench.cpp)
-# target_link_libraries(bench PRIVATE sr_core)
+# ---------------------------------------------------------------- 后续几天启用
