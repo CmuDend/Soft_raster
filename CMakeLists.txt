@@ -21,6 +21,7 @@ add_library(sr_core
   src/pipeline/rasterizer.cpp
   src/pipeline/clip.cpp
   src/pipeline/renderer.cpp
+  src/pipeline/tiles.cpp
   src/pipeline/shader.cpp
   src/scene/primitives.cpp
   src/scene/obj_loader.cpp
@@ -49,6 +50,7 @@ add_executable(test_all
   tests/test_raster.cpp
   tests/test_clip.cpp
   tests/test_texture.cpp
+  tests/test_tiles.cpp
 )
 target_link_libraries(test_all PRIVATE sr_core)
 target_compile_options(test_all PRIVATE -Wall -Wextra -Wshadow)

@@ -1,7 +1,7 @@
-// D6：benchmark 骨架。指导 §10.1 的三条要求：
+// D6/D7：benchmark。指导 §10.1 的三条要求：
 //   1. 每个配置跑 30 帧、丢掉前 3 帧预热，报中位数（不报最好成绩）
 //   2. 同时统计三角形数、覆盖片元、着色片元 → 算出 overdraw
-//   3. 分阶段计时：顶点 / 光栅
+//   3. 分阶段计时：顶点 / 分箱 / 光栅（D7 起光栅是多线程的）
 // 输出 CSV 到 stdout（或 --csv 指定的文件），方便脚本画图。
 
 #include <algorithm>
@@ -34,6 +34,7 @@ struct Variant {
     bool incrementalEdges;
     bool cullBack;
     bool flatShade;   // 用常量着色器替换材质：差值 = 片元着色的成本
+    int threads;      // 0 = 用满硬件线程
 };
 
 // 只返回常量颜色。它和 PhongShader 的耗时差就是"着色"这一段的代价。
@@ -68,6 +69,7 @@ Result runCase(int w, int h, const Variant& variant, int frames, int warmup) {
     RenderOptions opt;
     opt.incrementalEdges = variant.incrementalEdges;
     opt.cullBack = variant.cullBack;
+    opt.threads = variant.threads;
 
     const FlatShader flat;
 
@@ -106,16 +108,17 @@ Result runCase(int w, int h, const Variant& variant, int frames, int warmup) {
 void printCsvHeader(std::FILE* out) {
     std::fprintf(out,
                  "scene,width,height,variant,ms_median,ms_p05,ms_p95,fps,triangles,culled,emitted,"
-                 "covered,shaded,overdraw,ms_vertex,ms_raster\n");
+                 "covered,shaded,overdraw,ms_vertex,ms_bin,ms_raster,threads,tiles\n");
 }
 
 void printCsvRow(std::FILE* out, const char* sceneName, int w, int h, const Variant& v,
                  const Result& r) {
     const RenderStats& s = r.stats;
-    std::fprintf(out, "%s,%d,%d,%s,%.3f,%.3f,%.3f,%.1f,%zu,%zu,%zu,%llu,%llu,%.3f,%.3f,%.3f\n",
+    std::fprintf(out,
+                 "%s,%d,%d,%s,%.3f,%.3f,%.3f,%.1f,%zu,%zu,%zu,%llu,%llu,%.3f,%.3f,%.3f,%.3f,%d,%d\n",
                  sceneName, w, h, v.name, r.msMedian, r.msP05, r.msP95, 1000.0 / r.msMedian,
                  s.triangles, s.culled, s.emitted, s.covered, s.shaded, s.overdraw(), s.msVertex,
-                 s.msRaster);
+                 s.msBin, s.msRaster, s.threads, s.tiles);
 }
 
 }  // namespace
@@ -146,12 +149,18 @@ int main(int argc, char** argv) {
         }
     }
 
-    // 所有 variant 跑同一份场景，每次只改一个开关
+    // 所有 variant 跑同一份场景，每次只改一个开关。
+    // 前四个固定 1 线程：D6 的优化阶梯要能和 D5 的数字直接比。
+    // 后面几个只改线程数：D7 的"线程数 → 帧时间"曲线。
     const Variant variants[] = {
-        {"naive", false, true, false},        // D2 写法：每像素重算三次边函数
-        {"incremental", true, true, false},   // D6：增量边函数
-        {"no-cull", true, false, false},      // 关掉背面剔除，量它的收益
-        {"flat-shade", true, true, true},     // 常量着色器：和 incremental 的差 = 着色成本
+        {"naive", false, true, false, 1},         // D2 写法：每像素重算三次边函数
+        {"incremental", true, true, false, 1},    // D6：增量边函数
+        {"no-cull", true, false, false, 1},       // 关掉背面剔除，量它的收益
+        {"flat-shade", true, true, true, 1},      // 常量着色器：和 incremental 的差 = 着色成本
+        {"tiled-2", true, true, false, 2},        // D7：tile 分箱 + 2 线程
+        {"tiled-4", true, true, false, 4},
+        {"tiled-8", true, true, false, 8},
+        {"tiled-auto", true, true, false, 0},     // 用满硬件线程
     };
 
     std::FILE* csv = stdout;
@@ -165,17 +174,18 @@ int main(int argc, char** argv) {
 
     printCsvHeader(csv);
 
-    std::fprintf(stderr, "%-12s %-11s %-12s %8s %8s %8s %8s %8s\n", "scene", "res", "variant",
-                 "median", "p05", "p95", "vertex", "raster");
+    std::fprintf(stderr, "%-12s %-11s %-12s %8s %8s %8s %8s %8s %8s %5s\n", "scene", "res",
+                 "variant", "median", "p05", "p95", "vertex", "bin", "raster", "thr");
 
     for (const Resolution& res : resolutions) {
         for (const Variant& v : variants) {
             const Result r = runCase(res.w, res.h, v, frames, warmup);
             printCsvRow(csv, "demo", res.w, res.h, v, r);
             std::fflush(csv);
-            std::fprintf(stderr, "%-12s %4dx%-6d %-12s %7.2fms %7.2f %7.2f %7.2f %7.2f\n", "demo",
+            std::fprintf(stderr,
+                         "%-12s %4dx%-6d %-12s %7.2fms %7.2f %7.2f %7.2f %7.2f %7.2f %5d\n", "demo",
                          res.w, res.h, v.name, r.msMedian, r.msP05, r.msP95, r.stats.msVertex,
-                         r.stats.msRaster);
+                         r.stats.msBin, r.stats.msRaster, r.stats.threads);
         }
     }
 

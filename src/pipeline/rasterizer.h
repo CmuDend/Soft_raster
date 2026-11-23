@@ -38,10 +38,17 @@ public:
 };
 
 // 光栅化的开关。拆成结构体是为了 bench 能一次只改一个变量（D6）。
+// scissor 是 D7 加的：tile 渲染时每个 tile 只许写自己那块像素，写集合互不相交，
+// 于是多线程下既不需要锁，也不会有假共享（相邻 tile 至少隔 32 px = 128 B）。
 struct RasterOptions {
     bool cullBack = true;            // 背面剔除
     bool perspectiveCorrect = true;  // 透视校正插值
     bool incrementalEdges = true;    // 增量边函数；false = D2 的逐像素重算，做对照
+
+    int x0 = 0;                      // scissor 左上（含）
+    int y0 = 0;
+    int x1 = 0x7fffffff;             // scissor 右下（不含）
+    int y1 = 0x7fffffff;
 };
 
 // 片元计数器：overdraw = covered / shaded，bench 用它说话

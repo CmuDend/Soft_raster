@@ -1,8 +1,10 @@
 #include "pipeline/renderer.h"
 
 #include <chrono>
+#include <thread>
 
 #include "pipeline/clip.h"
+#include "pipeline/tiles.h"
 
 namespace {
 
@@ -11,12 +13,6 @@ using Clock = std::chrono::steady_clock;
 double msSince(Clock::time_point a, Clock::time_point b) {
     return std::chrono::duration<double, std::milli>(b - a).count();
 }
-
-// 屏幕空间三角形 + 它该用哪个着色器
-struct ScreenTri {
-    SVert a, b, c;
-    const IShader* shader = nullptr;
-};
 
 // 帧间复用，避免每帧重新分配 ~1MB
 std::vector<ScreenTri>& scratch() {
@@ -90,16 +86,28 @@ void renderScene(Framebuffer& fb, const std::vector<DrawCall>& calls, const Mat4
     }
     const Clock::time_point t1 = Clock::now();
 
-    // ---------- 阶段 2：光栅化 + 深度测试 + 着色 ----------
-    const RasterOptions ropt{opt.cullBack, opt.perspectiveCorrect, opt.incrementalEdges};
-    RasterCounters counters;
-    for (const ScreenTri& t : tris) {
-        drawTriangle(fb, t.a, t.b, t.c, ropt, *t.shader, &counters);
-    }
+    // ---------- 阶段 2：分箱（指导 §10.4 的阶段 2）----------
+    const TileLists tiles = binTriangles(tris, fb.width(), fb.height(), opt.tileSize);
     const Clock::time_point t2 = Clock::now();
 
+    // ---------- 阶段 3：逐 tile 光栅化（指导 §10.4 的阶段 3）----------
+    const int threads = opt.threads > 0
+                            ? opt.threads
+                            : std::max(1, int(std::thread::hardware_concurrency()));
+    RasterOptions ropt;
+    ropt.cullBack = opt.cullBack;
+    ropt.perspectiveCorrect = opt.perspectiveCorrect;
+    ropt.incrementalEdges = opt.incrementalEdges;
+
+    RasterCounters counters;
+    renderTiles(fb, tris, tiles, ropt, threads, &counters);
+    const Clock::time_point t3 = Clock::now();
+
     local.msVertex = msSince(t0, t1);
-    local.msRaster = msSince(t1, t2);
+    local.msBin = msSince(t1, t2);
+    local.msRaster = msSince(t2, t3);
+    local.tiles = tiles.tileCount();
+    local.threads = threads;
     local.covered = counters.covered;
     local.shaded = counters.shaded;
 

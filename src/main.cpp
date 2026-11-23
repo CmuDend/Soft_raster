@@ -33,12 +33,16 @@ struct Options {
     bool normalizeNormal = true;   // --no-normalize
     bool clipNear = true;          // --no-clip：退回 D4 的"整片丢弃"做对照
     bool incrementalEdges = true;  // --no-incremental：退回 D2 的逐像素边函数
+    int threads = 0;               // --threads N；0 = 用满硬件线程
+    int tileSize = 32;             // --tile N
 };
 
 RenderOptions toRenderOptions(const Options& o) {
     RenderOptions r;
     r.clipNear = o.clipNear;
     r.incrementalEdges = o.incrementalEdges;
+    r.threads = o.threads;
+    r.tileSize = o.tileSize;
     return r;
 }
 
@@ -78,6 +82,10 @@ int main(int argc, char** argv) {
             opt.clipNear = false;
         } else if (std::strcmp(argv[i], "--no-incremental") == 0) {
             opt.incrementalEdges = false;
+        } else if (std::strcmp(argv[i], "--threads") == 0 && i + 1 < argc) {
+            opt.threads = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--tile") == 0 && i + 1 < argc) {
+            opt.tileSize = std::atoi(argv[++i]);
         } else if (std::strcmp(argv[i], "--model") == 0 && i + 1 < argc) {
             modelPath = argv[++i];
         } else if (std::strcmp(argv[i], "--yaw") == 0 && i + 1 < argc) {
@@ -127,10 +135,11 @@ int main(int argc, char** argv) {
             const double ms = times[times.size() / 2];
             std::printf("%d 帧中位数 %.2f ms/帧（%.0f FPS，%zu 三角形，%dx%d）\n", benchFrames, ms,
                         1000.0 / ms, scene.triangleCount(), kWidth, kHeight);
-            std::printf("  顶点 %.2f ms + 光栅 %.2f ms | 覆盖 %llu 片元（%.2f/像素），着色 %llu"
-                        "（%.0f%% 通过深度测试）\n",
-                        stats.msVertex, stats.msRaster, stats.covered, stats.overdraw(),
-                        stats.shaded, 100.0 * stats.shadeRatio());
+            std::printf("  顶点 %.2f + 分箱 %.2f + 光栅 %.2f ms（%d tile × %d 线程）\n",
+                        stats.msVertex, stats.msBin, stats.msRaster, stats.tiles, stats.threads);
+            std::printf("  覆盖 %llu 片元（%.2f/像素），着色 %llu（%.0f%% 通过深度测试）\n",
+                        stats.covered, stats.overdraw(), stats.shaded,
+                        100.0 * stats.shadeRatio());
             return 0;
         }
 

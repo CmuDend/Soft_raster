@@ -67,10 +67,15 @@ void drawTriangle(Framebuffer& fb, SVert v0, SVert v1, SVert v2, const RasterOpt
 
     const float invArea = 1.0f / area;
 
-    const int minX = std::max(0, static_cast<int>(std::floor(std::min({v0.x, v1.x, v2.x}))));
-    const int maxX = std::min(fb.width() - 1, static_cast<int>(std::ceil(std::max({v0.x, v1.x, v2.x}))));
-    const int minY = std::max(0, static_cast<int>(std::floor(std::min({v0.y, v1.y, v2.y}))));
-    const int maxY = std::min(fb.height() - 1, static_cast<int>(std::ceil(std::max({v0.y, v1.y, v2.y}))));
+    // 包围盒再和 scissor 求交：scissor 一律用 [x0, x1) 半开区间（指导 §10.4 的 tile）
+    const int minX = std::max(std::max(0, opt.x0),
+                              static_cast<int>(std::floor(std::min({v0.x, v1.x, v2.x}))));
+    const int maxX = std::min(std::min(fb.width(), opt.x1) - 1,
+                              static_cast<int>(std::ceil(std::max({v0.x, v1.x, v2.x}))));
+    const int minY = std::max(std::max(0, opt.y0),
+                              static_cast<int>(std::floor(std::min({v0.y, v1.y, v2.y}))));
+    const int maxY = std::min(std::min(fb.height(), opt.y1) - 1,
+                              static_cast<int>(std::ceil(std::max({v0.y, v1.y, v2.y}))));
     if (minX > maxX || minY > maxY) return;
 
     Color* color = fb.colorData();
